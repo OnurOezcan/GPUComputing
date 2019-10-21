@@ -1,7 +1,7 @@
 all: main 
 
 main:
-	gcc -Wall -pedantic -o main main.c -lm -fopenmp
+	gcc -Wall -pedantic -o uebungAusfuehrbar main.c -lm -fopenmp
 
 clean:
-	rm -rf *.o main
+	rm -rf *.o uebungAusfuehrbar
