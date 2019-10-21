@@ -23,15 +23,15 @@ unsigned int getMaxMatrixSize()
                       return ERROR;
         }
     }
-    printf("MemTotal           : %11ld bytes\n", info.totalram);
-    printf("MemFree            : %11ld bytes\n", info.freeram);
+    printf("Gesamtspeicher           : %11ld bytes\n", info.totalram);
+    printf("Freier Speicher          : %11ld bytes\n", info.freeram);
     maxSize = info.freeram / sizeof(float);
-    printf("PossibleFloats     : %11ld floats\n", maxSize);
+    printf("Anzahl möglicher Floats  : %11ld floats\n", maxSize);
     //Each Vector needs space, 2 for the nxn-Matrix, one for the input vector and one for the output vector
     //Therefore use pq-formular because of : n^2+2n=MaximalVerfuegbareFloats
     unsigned int vectorSize = pow((double)maxSize-0.75F, 1.0F/2.0F)-1;
-    printf("MaxUsableFloats    : %11ld floats\n", (long)pow((double)vectorSize, 2)+2*vectorSize);
-    printf("MaxVectorSize      : %11d indices\n", vectorSize);
+    printf("Maximal nutzbare Floats  : %11ld floats\n", (long)pow((double)vectorSize, 2)+2*vectorSize);
+    printf("Maximale Vektor Größe    : %11d indices\n", vectorSize);
     printf("=================================\n");
     return vectorSize;
 }
