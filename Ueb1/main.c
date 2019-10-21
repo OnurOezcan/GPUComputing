@@ -42,8 +42,8 @@ void berechneMatrix()
     printf("hier sollte die Matrix multiplikation berechnet werden");
 }
 
-void initMatrix(){
-  printf("hier soll die Matrix und der Vektor zur Multiplikation mit random floats gefüllt werden.");
+void initMatrix(unsigned int maxMatrixSize){
+  printf("die hier erstellte Matrix, muss eine %d x %d Matrix sein.", maxMatrixSize, maxMatrixSize);
 }
 
 int main()
@@ -51,9 +51,9 @@ int main()
 
   //init System max Size (RAM) nXn Matrix + 2 Vektoren (multiplikator und ergebnis)
   // SPEICHERFREIGABE NICHT VERGESSEN!!!!
-  getMaxMatrixSize();
+  unsigned int maxMatrixSize = getMaxMatrixSize();
   // fülle Matrix und Vektor mit Random Float werten
-  initMatrix();
+  initMatrix(maxMatrixSize);
 
 
   // start timer
