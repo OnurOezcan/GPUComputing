@@ -74,24 +74,24 @@ void calculateMatrix(float** matrix ,float* vector, unsigned long dimension) {
 //    }
 }
 
-float** initMatrix(unsigned long maxMatrixSize) {
+float** initMatrix(unsigned long dimension) {
 //    printf("die hier erstellte Matrix, muss eine %lu x %lu Matrix sein.", maxMatrixSize, maxMatrixSize);
 
     /*
 		Generate 2 dimensional random TYPE matrix.
 	*/
-    float** matrix = malloc(maxMatrixSize * sizeof(float*));
+    float** matrix = malloc(dimension * sizeof(float*));
 
     #pragma omp parallel for
-    for (unsigned long i = 0; i < maxMatrixSize; i++) {
-        matrix[i] = malloc(maxMatrixSize * sizeof(float));
+    for (unsigned long i = 0; i < dimension; i++) {
+        matrix[i] = malloc(dimension * sizeof(float));
     }
 
     //Random seed
     srandom(time(0) + clock() + random());
     #pragma omp parallel for
-    for (unsigned long i = 0; i < maxMatrixSize; i++) {
-        for (unsigned long j = 0; j < maxMatrixSize; j++) {
+    for (unsigned long i = 0; i < dimension; i++) {
+        for (unsigned long j = 0; j < dimension; j++) {
             matrix[i][j] = (float) (rand() % 1000000 + 10);
         }
     }
