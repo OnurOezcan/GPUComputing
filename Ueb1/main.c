@@ -5,11 +5,16 @@
 #include <errno.h>      // for Errornumbers
 #include <math.h>       // for Matrixmultiplikation
 #include <stdlib.h>
-//#include <zconf.h>
 #include <omp.h>        // for multicore process
 
 const int ERROR = -1;
 
+struct times {
+    double sum;
+    double init;
+    double sequentialCalculation;
+    double parallelCalculation;
+};
 
 unsigned long getDimension() {
     struct sysinfo info;
@@ -27,8 +32,9 @@ unsigned long getDimension() {
     unsigned long long totalRam = info.mem_unit * info.totalram;
     unsigned long long freeRam = info.mem_unit * info.freeram;
 
-    //Subtract 10% from available RAM to prevent it from overflowing.
-    freeRam = (unsigned long long) ((double) freeRam * 0.9);
+    //Subtract 15% from available RAM to prevent it from overflowing.
+    //DO NOT REMOVE IT OTHERWISE YOUR PC WILL CRASH WITH A PROBABILITY (happened twice to me)
+    freeRam = (unsigned long long) ((double) freeRam * 0.85);
 
     unsigned long long maxSize = freeRam / sizeof(float);
 
@@ -46,11 +52,34 @@ unsigned long getDimension() {
     return vectorSize;
 }
 
-float* sequentialMatrixCalculation(float** matrix, float* vector, unsigned long dimension) {
+double calculateTimeDifference(struct timeval start, struct timeval end) {
+    long seconds =  (end.tv_sec - start.tv_sec);
+    int micros = abs((int)end.tv_usec - (int)start.tv_usec);
+    return (double) seconds + (double) micros / 1e6f;
+}
+
+float* sequentialMatrixCalculation(float** matrix, const float* vector, unsigned long dimension, struct times* times) {
     float* result = malloc(dimension * sizeof(float));
 
-    struct timeval t0, t1;
-    gettimeofday(&t0, 0);
+    struct timeval start, end;
+    gettimeofday(&start, 0);
+
+    for (unsigned long i = 0; i < dimension; i++) {
+        for (unsigned long j = 0; j < dimension; j++) {
+            result[i] += matrix[i][j] * vector[j];
+        }
+    }
+
+    gettimeofday(&end, 0);
+    times->sequentialCalculation = calculateTimeDifference(start, end);
+    return result;
+}
+
+float* parallelMatrixCalculation(float** matrix, const float* vector, unsigned long dimension, struct times* times) {
+    float* result = malloc(dimension * sizeof(float));
+
+    struct timeval start, end;
+    gettimeofday(&start, NULL);
 
     #pragma omp parallel for
     for (unsigned long i = 0; i < dimension; i++) {
@@ -59,14 +88,16 @@ float* sequentialMatrixCalculation(float** matrix, float* vector, unsigned long 
         }
     }
 
-    gettimeofday(&t1, 0);
-    double elapsed = ((float) t1.tv_sec - t0.tv_sec) * 1.0f + ((float) t1.tv_usec - t0.tv_usec) / 1000000.0f;
-    printf("Benötigte Zeit: %f", elapsed);
+    gettimeofday(&end, NULL);
+    times->parallelCalculation = calculateTimeDifference(start, end);
     return result;
 }
 
-void calculateMatrix(float** matrix ,float* vector, unsigned long dimension) {
-    float* result = sequentialMatrixCalculation(matrix, vector, dimension);
+void calculateMatrix(float** matrix ,float* vector, unsigned long dimension, struct times* times) {
+    float* result1 = sequentialMatrixCalculation(matrix, vector, dimension, times);
+    free(result1);
+    float* result2 = parallelMatrixCalculation(matrix, vector, dimension, times);
+    free(result2);
 
     printf("\n");
 //    for (unsigned long i = 0; i < dimension; i++) {
@@ -110,13 +141,17 @@ float* initVector(unsigned long dimension) {
 
 int main() {
     //init System max Size (RAM) n X n Matrix and 2 vectors (multiplier and result)
+    struct times times;
 
     // start timer
-    struct timeval start, end;
+    struct timeval start, end, startInit, endInit;
     gettimeofday(&start, NULL);
 
     //gets the dimension for the matrix abd the vectors
     unsigned long dimension = getDimension();
+
+    //start timer for initialization
+    gettimeofday(&startInit, NULL);
 
     //fills matrix with random float values
     float** matrix = initMatrix(dimension);
@@ -124,21 +159,31 @@ int main() {
     //fills vector with random float values
     float* vector = initVector(dimension);
 
+    //end timer for initialization
+    gettimeofday(&endInit, NULL);
+
+    //calculate time for initialization;
+    times.init = calculateTimeDifference(startInit, endInit);
+
     //calculate the matrix multiplication
-    calculateMatrix(matrix, vector, dimension);
+    calculateMatrix(matrix, vector, dimension, &times);
 
     // end timer
     gettimeofday(&end, NULL);
 
-    // calculate Op time
-    long seconds = (end.tv_sec - start.tv_sec);
-    long micros = ((seconds * (long) 1e6) + end.tv_usec) - (start.tv_usec);
+    times.sum = calculateTimeDifference(start, end);
 
-    // print op time
-    printf("Time elpased is %ld seconds and %ld micros\n", seconds, micros);
+    //print time results
+    printf("time in seconds\n");
+    printf("Time to init matrix and vector : %f\n", times.init);
+    printf("Time for sequential calculation: %f\n", times.sequentialCalculation);
+    printf("Time for parallel calculation  : %f\n", times.parallelCalculation);
+    printf("-------------------------------------------\n");
+    printf("Time sum                       : %f\n", times.sum);
 
     //free memory
     free(matrix);
+    free(vector);
 
     return 0;
 }
