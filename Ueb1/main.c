@@ -109,12 +109,12 @@ float** initMatrix(unsigned long dimension) {
     }
 
     //Random seed
-    unsigned short* seed = (unsigned short *) time(0);
-    seed48(seed);
+//    unsigned short* seed = (unsigned short *) time(0);
+//    seed48(seed);
     #pragma omp parallel for
     for (unsigned long i = 0; i < dimension; i++) {
         for (unsigned long j = 0; j < dimension; j++) {
-            matrix[i][j] = (float)  lrand48() / 100000;
+            matrix[i][j] = (float)  lrand48() / 100000.0f;
         }
     }
     return matrix;
@@ -125,7 +125,7 @@ float* initVector(unsigned long dimension) {
 
     #pragma omp parallel for
     for (unsigned long i = 0; i < dimension; i++) {
-        vector[i] = (float)  lrand48() / 100000;
+        vector[i] = (float)  lrand48() / 100000.0f;
     }
     return vector;
 }
