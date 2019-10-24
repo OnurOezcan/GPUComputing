@@ -47,7 +47,7 @@ unsigned long getDimension() {
     unsigned int vectorSize = (int) pow((double) maxSize - 0.75F, 1.0F / 2.0F) - 1;
     printf("Maximal nutzbare Floats  : %11ld floats\n", (long) pow((double) vectorSize, 2) + 2 * vectorSize);
     printf("Maximale Vektor Größe    : %11d indices\n", vectorSize);
-    printf("Anzahl Threads verfügbar : %d Threads\n", omp_get_num_threads());
+    printf("Anzahl Threads verfügbar : %d Threads\n", omp_get_max_threads());
     printf("=================================\n");
     return vectorSize;
 }
@@ -58,28 +58,18 @@ double calculateTimeDifference(struct timeval start, struct timeval end) {
     return (double) seconds + (double) micros / 1e6f;
 }
 
-float* sequentialMatrixCalculation(float** matrix, const float* vector, unsigned long dimension, struct times* times) {
+float* calculation(float** matrix, const float* vector, unsigned long dimension, struct times* times, unsigned int useParallel) {
     float* result = malloc(dimension * sizeof(float));
 
     struct timeval start, end;
-    gettimeofday(&start, 0);
 
-    for (unsigned long i = 0; i < dimension; i++) {
-        for (unsigned long j = 0; j < dimension; j++) {
-            result[i] += matrix[i][j] * vector[j];
-        }
+    if (useParallel < 1) {
+        omp_set_num_threads(omp_get_max_threads());
+    } else {
+        omp_set_num_threads(1);
     }
 
-    gettimeofday(&end, 0);
-    times->sequentialCalculation = calculateTimeDifference(start, end);
-    return result;
-}
-
-float* parallelMatrixCalculation(float** matrix, const float* vector, unsigned long dimension, struct times* times) {
-    float* result = malloc(dimension * sizeof(float));
-
-    struct timeval start, end;
-    gettimeofday(&start, NULL);
+    gettimeofday(&start, 0);
 
     #pragma omp parallel for
     for (unsigned long i = 0; i < dimension; i++) {
@@ -88,21 +78,21 @@ float* parallelMatrixCalculation(float** matrix, const float* vector, unsigned l
         }
     }
 
-    gettimeofday(&end, NULL);
-    times->parallelCalculation = calculateTimeDifference(start, end);
+    gettimeofday(&end, 0);
+    if (useParallel < 1) {
+        times->parallelCalculation = calculateTimeDifference(start, end);
+    } else {
+        times->sequentialCalculation = calculateTimeDifference(start, end);
+    }
     return result;
 }
 
 void calculateMatrix(float** matrix ,float* vector, unsigned long dimension, struct times* times) {
-    float* result1 = sequentialMatrixCalculation(matrix, vector, dimension, times);
+    float* result1 = calculation(matrix, vector, dimension, times, 0);
     free(result1);
-    float* result2 = parallelMatrixCalculation(matrix, vector, dimension, times);
+    float* result2 = calculation(matrix, vector, dimension, times, 1);
     free(result2);
-
     printf("\n");
-//    for (unsigned long i = 0; i < dimension; i++) {
-//        printf("%f\n", result[i]);
-//    }
 }
 
 float** initMatrix(unsigned long dimension) {
@@ -119,11 +109,12 @@ float** initMatrix(unsigned long dimension) {
     }
 
     //Random seed
-    srandom(time(0) + clock() + random());
+    unsigned short* seed = (unsigned short *) time(0);
+    seed48(seed);
     #pragma omp parallel for
     for (unsigned long i = 0; i < dimension; i++) {
         for (unsigned long j = 0; j < dimension; j++) {
-            matrix[i][j] = (float) (rand() % 1000000 + 10);
+            matrix[i][j] = (float)  lrand48() / 100000;
         }
     }
     return matrix;
@@ -134,7 +125,7 @@ float* initVector(unsigned long dimension) {
 
     #pragma omp parallel for
     for (unsigned long i = 0; i < dimension; i++) {
-        vector[i] = (float) (rand() % 1000000 + 10);
+        vector[i] = (float)  lrand48() / 100000;
     }
     return vector;
 }
