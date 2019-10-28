@@ -8,6 +8,7 @@
 #include <omp.h>        // for multicore process
 
 const int ERROR = -1;
+int max_threads = 0;
 
 struct times {
     double sum;
@@ -64,7 +65,7 @@ float* calculation(float** matrix, const float* vector, unsigned long dimension,
     struct timeval start, end;
 
     if (useParallel < 1) {
-        omp_set_num_threads(omp_get_max_threads());
+        omp_set_num_threads(max_threads);
     } else {
         omp_set_num_threads(1);
     }
@@ -130,7 +131,8 @@ float* initVector(unsigned long dimension) {
     return vector;
 }
 
-int main() {
+void calculateWithDimension(long dimension) {
+    omp_set_num_threads(max_threads);
     //init System max Size (RAM) n X n Matrix and 2 vectors (multiplier and result)
     struct times times;
 
@@ -138,8 +140,8 @@ int main() {
     struct timeval start, end, startInit, endInit;
     gettimeofday(&start, NULL);
 
-    //gets the dimension for the matrix abd the vectors
-    unsigned long dimension = getDimension();
+//    //gets the dimension for the matrix abd the vectors
+//    unsigned long dimension = getDimension();
 
     //start timer for initialization
     gettimeofday(&startInit, NULL);
@@ -164,10 +166,13 @@ int main() {
 
     times.sum = calculateTimeDifference(start, end);
 
+    double s = times.sequentialCalculation / times.parallelCalculation;
+
     //print time results
-    printf("time in seconds\n");
+    printf("===============================================================\n\n\n");
+    printf("time in seconds for dimension %ld\n", dimension);
     printf("Time to init matrix and vector : %f\n", times.init);
-    printf("Time for sequential calculation: %f\n", times.sequentialCalculation);
+    printf("Time for sequential calculation: %f %f\n", times.sequentialCalculation, s);
     printf("Time for parallel calculation  : %f\n", times.parallelCalculation);
     printf("-------------------------------------------\n");
     printf("Time sum                       : %f\n", times.sum);
@@ -175,6 +180,68 @@ int main() {
     //free memory
     free(matrix);
     free(vector);
+}
+
+int main() {
+    max_threads = omp_get_max_threads();
+    calculateWithDimension(100);
+    sleep(2);
+    calculateWithDimension(1000);
+    sleep(2);
+    calculateWithDimension(10000);
+    sleep(2);
+    calculateWithDimension(20000);
+    sleep(2);
+    calculateWithDimension(30000);
+    sleep(2);
+    calculateWithDimension(40000);
+    sleep(2);
+    unsigned long dimension = getDimension();
+    calculateWithDimension(dimension);
+//    //init System max Size (RAM) n X n Matrix and 2 vectors (multiplier and result)
+//    struct times times;
+//
+//    // start timer
+//    struct timeval start, end, startInit, endInit;
+//    gettimeofday(&start, NULL);
+//
+//    //gets the dimension for the matrix abd the vectors
+//    unsigned long dimension = getDimension();
+//
+//    //start timer for initialization
+//    gettimeofday(&startInit, NULL);
+//
+//    //fills matrix with random float values
+//    float** matrix = initMatrix(dimension);
+//
+//    //fills vector with random float values
+//    float* vector = initVector(dimension);
+//
+//    //end timer for initialization
+//    gettimeofday(&endInit, NULL);
+//
+//    //calculate time for initialization;
+//    times.init = calculateTimeDifference(startInit, endInit);
+//
+//    //calculate the matrix multiplication
+//    calculateMatrix(matrix, vector, dimension, &times);
+//
+//    // end timer
+//    gettimeofday(&end, NULL);
+//
+//    times.sum = calculateTimeDifference(start, end);
+//
+//    //print time results
+//    printf("time in seconds\n");
+//    printf("Time to init matrix and vector : %f\n", times.init);
+//    printf("Time for sequential calculation: %f\n", times.sequentialCalculation);
+//    printf("Time for parallel calculation  : %f\n", times.parallelCalculation);
+//    printf("-------------------------------------------\n");
+//    printf("Time sum                       : %f\n", times.sum);
+//
+//    //free memory
+//    free(matrix);
+//    free(vector);
 
     return 0;
 }
