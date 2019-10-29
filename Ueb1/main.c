@@ -48,7 +48,7 @@ unsigned long getDimension() {
     unsigned int vectorSize = (int) pow((double) maxSize - 0.75F, 1.0F / 2.0F) - 1;
     printf("Maximal nutzbare Floats  : %11ld floats\n", (long) pow((double) vectorSize, 2) + 2 * vectorSize);
     printf("Maximale Vektor Größe    : %11d indices\n", vectorSize);
-    printf("Anzahl Threads verfügbar : %d Threads\n", omp_get_max_threads());
+    printf("Anzahl Threads verfügbar : %d Threads\n", max_threads);
     printf("=================================\n");
     return vectorSize;
 }
@@ -166,17 +166,23 @@ void calculateWithDimension(long dimension) {
 
     times.sum = calculateTimeDifference(start, end);
 
-    double s = times.sequentialCalculation / times.parallelCalculation;
-
     //print time results
     printf("===============================================================\n\n\n");
     printf("time in seconds for dimension %ld\n", dimension);
     printf("Time to init matrix and vector : %f\n", times.init);
-    printf("Time for sequential calculation: %f %f\n", times.sequentialCalculation, s);
+    printf("Time for sequential calculation: %f\n", times.sequentialCalculation);
     printf("Time for parallel calculation  : %f\n", times.parallelCalculation);
     printf("-------------------------------------------\n");
     printf("Time sum                       : %f\n", times.sum);
-
+    // speedup difference
+    if(times.parallelCalculation < times.sequentialCalculation){
+      double calculatedSpeedFactorSeq = times.sequentialCalculation / times.parallelCalculation; 
+      printf("\nParallel Computing is -- %f -- times faster\n", calculatedSpeedFactorSeq); 
+    }
+    else if(times.sequentialCalculation < times.parallelCalculation){
+        double calculatedSpeedFactorPar = times.parallelCalculation / times.sequentialCalculation; 
+        printf("\nSequential Computing is -- %f -- times faster\n", calculatedSpeedFactorPar); 
+    }
     //free memory
     free(matrix);
     free(vector);
