@@ -63,7 +63,8 @@ float* calculation(float** matrix, const float* vector, unsigned long dimension,
 
     struct timeval start, end;
 
-    if (useParallel < 1) {
+    if (useParallel > 0) {
+        printf("UseParallel: %d", max_threads);
         omp_set_num_threads(max_threads);
     } else {
         omp_set_num_threads(1);
@@ -71,19 +72,22 @@ float* calculation(float** matrix, const float* vector, unsigned long dimension,
 
     gettimeofday(&start, 0);
 
+//	#pragma omp parallel for schedule(dynamic, 1) // Aufgabe 2
+//    #pragma omp parallel for schedule(static, 3)     // Aufgabe 2
+//    #pragma omp parallel for schedule(guided, 3)     // Aufgabe 2
     #pragma omp parallel for
-	//#pragma omp parallel for schedule(dynamic, 4) // Aufgabe 2
-    //#pragma omp parallel for schedule(static)     // Aufgabe 2
-    //#pragma omp parallel for schedule(guided)     // Aufgabe 2
     for (unsigned long i = 0; i < dimension; i++) {
+        float tmp = 0;
         for (unsigned long j = 0; j < dimension; j++) {
-            result[i] += matrix[i][j] * vector[j];
+            tmp = matrix[i][j] * vector[j];
+            result[i] += tmp;
         }
-		//for(int j=0; j < *(*result+i); j++){}  //Aufgabe 2
+        unsigned long long t = 0;
+		for(long long j = 0; j < (int)tmp; j++){t++;}  //Aufgabe 2
     }
 
     gettimeofday(&end, 0);
-    if (useParallel < 1) {
+    if (useParallel > 0) {
         times->parallelCalculation = calculateTimeDifference(start, end);
     } else {
         times->sequentialCalculation = calculateTimeDifference(start, end);
@@ -92,10 +96,10 @@ float* calculation(float** matrix, const float* vector, unsigned long dimension,
 }
 
 void calculateMatrix(float** matrix ,float* vector, float* result, unsigned int dimension, struct times* times) {
-    result = calculation(matrix, vector, dimension, times, 0);
-    for (unsigned int i = 0; i < dimension; i++) {
-        result[i] = 0;
-    }
+//    result = calculation(matrix, vector, dimension, times, 0);
+//    for (unsigned int i = 0; i < dimension; i++) {
+//        result[i] = 0;
+//    }
 
     result = calculation(matrix, vector, dimension, times, 1);
     printf("\n");
