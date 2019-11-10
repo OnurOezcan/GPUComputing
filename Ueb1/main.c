@@ -72,10 +72,14 @@ float* calculation(float** matrix, const float* vector, unsigned long dimension,
     gettimeofday(&start, 0);
 
     #pragma omp parallel for
+	//#pragma omp parallel for schedule(dynamic, 4) // Aufgabe 2
+    //#pragma omp parallel for schedule(static)     // Aufgabe 2
+    //#pragma omp parallel for schedule(guided)     // Aufgabe 2
     for (unsigned long i = 0; i < dimension; i++) {
         for (unsigned long j = 0; j < dimension; j++) {
             result[i] += matrix[i][j] * vector[j];
         }
+		//for(int j=0; j < *(*result+i); j++){}  //Aufgabe 2
     }
 
     gettimeofday(&end, 0);
