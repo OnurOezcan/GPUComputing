@@ -82,8 +82,8 @@ float* calculation(float** matrix, const float* vector, unsigned long dimension,
             tmp = matrix[i][j] * vector[j];
             result[i] += tmp;
         }
-        unsigned long long t = 0;
-		for(long long j = 0; j < (int)tmp; j++){t++;}  //Aufgabe 2
+        //unsigned long long t = 0;
+	//	for(long long j = 0; j < (int)tmp; j++){t++;}  //Aufgabe 2
     }
 
     gettimeofday(&end, 0);
@@ -96,10 +96,10 @@ float* calculation(float** matrix, const float* vector, unsigned long dimension,
 }
 
 void calculateMatrix(float** matrix ,float* vector, float* result, unsigned int dimension, struct times* times) {
-//    result = calculation(matrix, vector, dimension, times, 0);
-//    for (unsigned int i = 0; i < dimension; i++) {
-//        result[i] = 0;
-//    }
+    result = calculation(matrix, vector, dimension, times, 0);
+    for (unsigned int i = 0; i < dimension; i++) {
+        result[i] = 0;
+    }
 
     result = calculation(matrix, vector, dimension, times, 1);
     printf("\n");
