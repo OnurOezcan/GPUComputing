@@ -158,7 +158,7 @@ void calculateWithDimension(float** matrix, float* vector, float* result, unsign
 
     //print time results
     printf("===============================================================\n");
-    printf("time in seconds for dimension %ld\n", dimension);
+    printf("time in seconds for dimension %d\n", dimension);
     printf("Time for sequential calculation: %f\n", times.sequentialCalculation);
     printf("Time for parallel calculation  : %f\n", times.parallelCalculation);
     printf("-------------------------------------------\n");
