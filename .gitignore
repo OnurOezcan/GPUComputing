@@ -1,3 +1,6 @@
 .vscode
 Ueb1/uebungAusfuehrbar
 .idea
+Ueb2/Examples/*.lib
+Ueb2/Examples/*.exe
+Ueb2/Examples/*.exp
