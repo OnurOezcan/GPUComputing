@@ -48,12 +48,15 @@ double second(void)
 #error unsupported platform
 #endif
 
-int exercise1();
-int exercise2();
+void exercise1();
+void exercise3();
 
 int main() {
+	//init random seed
+	srand((unsigned) second());
+
 	//exercise1();
-	exercise2();
+	exercise3();
 }
 
 
@@ -100,7 +103,7 @@ __global__ void addValuesB(int* matrix, int* interimResults) {
 }
 
 
-int exercise1() {
+void exercise1() {
 	/*
 		A is slightly faster than B due to the memory management. This is because the data is always loaded in blocks. Since A calculates the data linearly, fewer data blocks have to be loaded by the CPU
 	*/
@@ -129,10 +132,6 @@ int exercise1() {
 	double timeStartA, timeStopA, timeParallelA;
 	double timeStartB, timeStopB, timeParallelB;
 
-
-	// init with values
-	// rand was not initialized with srand on purpose. In this case we always fill the matrix with the same "random" values, therefore we can 
-	// compare it better 
 	long long added = 0;
 	timeStart = second();
 	for (unsigned int i = 0; i < N; i++) {
@@ -174,7 +173,112 @@ int exercise1() {
 	printf("Sum of a): %d\n", resultA);
 	printf("Time A: %f\n\n", timeParallelA);
 
-	
+	cudaFree(matrix);
+	cudaCheckError();
 
-	return 0;
+	cudaFree(interimResultsA);
+	cudaCheckError();
+
+	cudaFree(interimResultsB);
+	cudaCheckError();
 }
+
+//=====================================================================================
+//									Aufgabe 2										 //
+//=====================================================================================
+
+/*
+	NVIDIA RTX 2080 (8GB Memory)
+	Every calculation was performed 10 times and the average is found in the table below
+
+
+	Dimension |	CPU				| GPU			 | factor
+	-----------------------------------------------------
+	10		  | 0.000001		| 0.000168		 | 0,006
+	100		  | 0.000012		| 0.000311		 | 0,038
+	1.000	  | 0.001100		| 0.002683		 | 0,409
+	10.000	  | 0.106819		| 0.141655       | 0,75
+	20.000	  | 0.422229		| 0.520808		 | 0,81
+	30.000	  | 0.955817	    | 1.192795		 | 0,80
+
+	As we can see in the table is the CPU always fast in this specifi calculation than the GPU
+	But as the number of calculations get higher the CPU and GPU get closer with the time it takes to calculate. So its possible that the GPU is faster than the CPU with a bigger matrix. But due to memory limitations i cant test this.
+*/
+
+const int DIMENSION = 30000;
+const int NUMBER_OF_BLOCKS = 100;
+const int NUMBER_OF_THREADS = DIMENSION / NUMBER_OF_BLOCKS;
+
+__global__ void calculateMatrix(unsigned int dimension, int* matrix, int* vector, long long* result) {
+	int threadId = blockIdx.x * blockDim.x + threadIdx.x;
+	const unsigned int size = dimension * (dimension + 1) / 2;
+	long index = size - ((dimension - threadId) * (dimension - threadId + 1) / 2);
+
+	for (unsigned int j = 0; j < dimension - threadId; j++) {
+		result[threadId] += matrix[index + j] * vector[j];
+	}
+}
+
+void exercise3() {
+	printf("Start of Exercise 3!\n");
+
+	//measures time to initialize matrix and vectors
+	double timeStartInitMatrix, timeStopInitMatrix, timeToInitMatrix;
+	double timeStartInitVector, timeStopInitVector, timeToInitVector;
+	double timeStartCalculate, timeStopCalculate, timeToCalculate;
+
+	//initializes the matrix
+	int* matrix;
+
+	int size = (DIMENSION * (DIMENSION + 1)) / 2;
+	timeStartInitMatrix = second();
+
+	cudaMallocManaged(&matrix, size * sizeof(int));
+	cudaCheckError();
+
+	for (int i = 0; i < size; i++) {
+		matrix[i] = rand() % 50;
+	}
+
+	timeStopInitMatrix = second();
+	timeToInitMatrix = timeStopInitMatrix - timeStartInitMatrix;
+	printf("Time to init Matrix: %f\n", timeToInitMatrix);
+
+	//initializes the vector
+	int* vector;
+	timeStartInitVector = second();
+
+	cudaMallocManaged(&vector, DIMENSION * sizeof(int));
+	cudaCheckError();
+
+	for (int i = 0; i < DIMENSION; i++) {
+		vector[i] = rand() % 50;
+	}
+
+	timeStopInitVector = second();
+	timeToInitVector = timeStopInitVector - timeStartInitVector;
+	printf("Time to init Vector: %f\n", timeToInitVector);
+
+	//initialize result vector
+	long long* result;
+
+	cudaMallocManaged(&result, DIMENSION * sizeof(long long));
+	cudaCheckError();
+
+	//calculate result
+	timeStartCalculate = second();
+	calculateMatrix << <NUMBER_OF_BLOCKS, NUMBER_OF_THREADS >> > (DIMENSION, matrix, vector, result);
+	cudaCheckError();
+	cudaDeviceSynchronize();
+	timeStopCalculate = second();
+	timeToCalculate = timeStopCalculate - timeStartCalculate;
+	printf("Time to Calculate: %f\n", timeToCalculate);
+
+	cudaFree(matrix);
+	cudaFree(vector);
+	cudaFree(result);
+}
+
+//=====================================================================================
+//									Aufgabe 5										 //
+//=====================================================================================
