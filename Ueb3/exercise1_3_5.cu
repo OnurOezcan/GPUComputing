@@ -282,3 +282,111 @@ void exercise3() {
 //=====================================================================================
 //									Aufgabe 5										 //
 //=====================================================================================
+#define NUMBER_OF_VALUES 16777216 //2^24
+#define THREADS 256 
+#define BLOCKS NUMBER_OF_VALUES / 2 / THREADS
+
+void printArray(int* array, int length) {
+	int i;
+	for (i = 0; i < length; ++i) {
+		printf("%d ", array[i]);
+		if ((i + 1) % 512 == 0) {
+			printf("\n");
+		}
+	}
+	printf("\n");
+}
+
+void fillArray(int* array, int length) {
+	for (int i = 0; i < length; ++i) {
+		array[i] = rand() % NUMBER_OF_VALUES;
+	}
+}
+
+//responsible for creating bitonic sequences of length 512.
+__global__ void bitonicSort(int* input) {
+	//Init
+	int glTid = threadIdx.x + blockDim.x * blockIdx.x * 2; 
+	int tid = threadIdx.x;                             
+	int bx = blockDim.x;
+	__shared__ int cache[512];
+
+	//Load and sync
+	cache[tid] = input[glTid];
+	cache[tid + bx] = input[glTid + bx];
+	__syncthreads();
+
+	for (int Stage = 0; Stage < 9; Stage++) {
+		int Nb = (int)(exp2((double)Stage));
+		for (int Substage = 0; Substage <= Stage; Substage++) {
+			//Map threads
+			//int index = (tid % Nb) + (tid/Nb)*(Nb*2);
+			int index = (int)fmod((float)tid, (float)Nb) + (tid / Nb) * (Nb * 2);
+			int exp2St = (int)exp2((double)Stage);
+			bool function1, function2;
+			if (blockIdx.x & 1 == 1) {
+				function1 = fmod((float)tid, (float)(exp2St * 2)) >= exp2St;
+				function2 = fmod((float)tid, (float)(exp2St * 2)) < exp2St;
+			} else {
+				function1 = fmod((float)tid, (float)(exp2St * 2)) < exp2St;
+				function2 = fmod((float)tid, (float)(exp2St * 2)) >= exp2St;
+			}
+
+
+			if (function1) {
+
+				//Increasing
+				int left = cache[index];
+				int right = cache[index + Nb];
+				if (left < right) {
+					//This is ok
+				}
+				else if (left > right) {
+					//Swap
+					cache[index] = right;
+					cache[index + Nb] = left;
+				}
+			}
+			if (function2) {
+				int left = cache[index];
+				int right = cache[index + Nb];
+				if (left > right) {
+					//This is ok
+				}
+				else if (left < right) {
+					//swap
+					cache[index] = right;
+					cache[index + Nb] = left;
+				}
+			}
+
+			//At the end of each substep
+			Nb = Nb / 2;
+			__syncthreads();
+		}
+	}
+
+	//Results back to global memory
+	input[glTid] = cache[tid];
+	input[glTid + bx] = cache[tid + bx];
+}
+
+void exercise5() {
+	printf("Start of Exercise 5!\n");
+	int* values;
+
+	cudaMallocManaged(&values, NUMBER_OF_VALUES * sizeof(int));
+	cudaCheckError();
+
+	fillArray(values, NUMBER_OF_VALUES);
+
+	int numberOfBlocks = BLOCKS;
+	int numberOfThreads = THREADS;
+	bitonicSort << <numberOfBlocks, numberOfThreads >> > (values);
+	cudaCheckError();
+	cudaDeviceSynchronize();
+	//printArray(values, NUMBER_OF_VALUES);
+
+	cudaFree(values);
+	cudaCheckError();
+}
