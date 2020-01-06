@@ -113,9 +113,6 @@ int exercise2() {
     //init rand
     srand((unsigned)second());
 
-    //gets maximum number of threads
-    max_threads = omp_get_max_threads();
-
     //set dimension
     unsigned int maxDimension = MAX_DIMENSION;
 
@@ -131,14 +128,6 @@ int exercise2() {
     timeStopInitMatrix = second();
     timeToInitMatrix = timeStopInitMatrix - timeStartInitMatrix;
     printf("Time to init Matrix: %f\n", timeToInitMatrix);
-    /*int index = 0;
-    for (int i = 0; i < maxDimension; i++) {
-        for (int j = 0; j < maxDimension - i; j++) {
-            printf("%d,", matrix[index]);
-            index++;
-        }
-        printf("\n");
-    }*/
 
     //initializes the vector
     int* vector;
@@ -147,10 +136,6 @@ int exercise2() {
     timeStopInitVector = second();
     timeToInitVector = timeStopInitVector - timeStartInitVector;
     printf("Time to init Vector: %f\n", timeToInitVector);
-    /*for (int i = 0; i < maxDimension; i++) {
-        printf("%d,", vector[i]);
-    }
-    printf("\n");*/
 
     //initialize result vector
     long long* result = (long long*)malloc(maxDimension * sizeof(long long));
@@ -159,18 +144,6 @@ int exercise2() {
     result = calculateMatrix(maxDimension, matrix, vector);
     timeStopCalculate = second();
     timeToCalculate = timeStopCalculate - timeStartCalculate;
-    /*for (int i = 0; i < maxDimension; i++) {
-        printf("%d,", result[i]);
-    }*/
-
-    /*const int e = maxDimension * (maxDimension + 1) / 2;
-    for (int i = 0; i < maxDimension; i++) {
-        for (int j = 0; j < maxDimension - i; j++) {
-            int in = e - ((maxDimension - i) * (maxDimension - i + 1) / 2) + j;
-            printf("%d,", in);
-        }
-        printf("\n");
-    }*/
     printf("Time to Calculate: %f\n", timeToCalculate);
     free(matrix);
     free(vector);
