@@ -84,7 +84,6 @@ long long* calculateMatrix(unsigned int dimension, int* matrix, int* vector) {
 
     //#pragma omp parallel for
     for (unsigned int i = 0; i < dimension; i++) {
-        result[i] = 0;
         const unsigned int size = dimension * (dimension + 1) / 2;
         long index = size - ((dimension - i) * (dimension - i + 1) / 2);
         for (unsigned int j = 0; j < dimension - i; j++) {
