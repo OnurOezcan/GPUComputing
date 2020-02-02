@@ -1,19 +1,3 @@
-/*************************************************************************************************
- * File: sobelFilter.cu
- * Date: 09/27/2017
- *
- * Compiling: Requires a Nvidia CUDA capable graphics card and the Nvidia GPU Computing Toolkit.
- *            Linux: nvcc -Wno-deprecated-gpu-targets -O3 -o edge sobelFilter.cu lodepng.cpp -Xcompiler -fopenmp
- *
- * Usage:   Linux: >> edge [filename.png]
- *
- * Description: This file is meant to handle all the sobel filter functions as well as the main
- *      function. Each sobel filter function runs in a different way than the others, one is a basic
- *      sobel filter running through just the cpu on a single thread, another runs through openmp
- *      to parallelize the single thread cpu function, and the last one runs through a NVIDIA gpu
- *      to parallelize the function onto the many cores available on the gpu.
- *************************************************************************************************/
-
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
 
