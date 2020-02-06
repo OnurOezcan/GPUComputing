@@ -1,3 +1,19 @@
+/*************************************************************************************************
+ * File: sobelFilter.cu
+ * Date: 09/27/2017
+ *
+ * Compiling: Requires a Nvidia CUDA capable graphics card and the Nvidia GPU Computing Toolkit.
+ *            Linux: nvcc -Wno-deprecated-gpu-targets -O3 -o edge sobelFilter.cu lodepng.cpp -Xcompiler -fopenmp
+ *
+ * Usage:   Linux: >> edge [filename.png]
+ *
+ * Description: This file is meant to handle all the sobel filter functions as well as the main
+ *      function. Each sobel filter function runs in a different way than the others, one is a basic
+ *      sobel filter running through just the cpu on a single thread, another runs through openmp
+ *      to parallelize the single thread cpu function, and the last one runs through a NVIDIA gpu
+ *      to parallelize the function onto the many cores available on the gpu.
+ *************************************************************************************************/
+
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
 
@@ -20,11 +36,15 @@ void printCudaDeviceInformation(int maxAvaialbeCores);
 void executeSobelOperator(char* image, int maxAvaialbeCores);
 
 //cpu sobel functions (sorted from slowest to fastest)
-void separate_step_sobel_cpu_with_indexing(const byte* orig, byte* cpu, const unsigned int width, const unsigned int height, int maxCores);
-void separate_step_sobel_cpu_without_indexing(const byte* orig, byte* cpu, const unsigned int width, const unsigned int height, int maxCores);
+void separateStepSobelCpuWithIndexing(const byte* image, byte* result, const unsigned int width, const unsigned int height, int maxCores);
+void separateStepSobelCpuWithInlineIndexing(const byte* image, byte* result, const unsigned int width, const unsigned int height, int maxCores);
+void separateStepSobelCpuWithoutIndexing(const byte* image, byte* result, const unsigned int width, const unsigned int height, int maxCores);
+void separateStepSobelCpuOptimizedCalculation(const byte* image, byte* result, const unsigned int width, const unsigned int height, int maxCores);
+void combinedStepsSobelCpu(const byte* image, byte* result, const unsigned int width, const unsigned int height, int maxCores);
+void combinedStepsSobelCpuOptimized(const byte* image, byte* result, const unsigned int width, const unsigned int height, int maxCores);
+
 void combined_step_sobel_cpu(const byte* orig, byte* cpu, const unsigned int width, const unsigned int height);
 void sobel_omp(const byte* orig, byte* cpu, const unsigned int width, const unsigned int height);
-void test(const byte* image, byte* cpu, const unsigned int width, const unsigned int height, int maxCores);
 
 int imageWidth = 0;
 
@@ -32,6 +52,11 @@ int imageWidth = 0;
 * Index function to access a 1d array like a 2d array
 */
 int getIndex(int x, int y) {
+    return imageWidth * y + x;
+};
+
+//same as inline function
+inline int getIndexInline(int x, int y) {
     return imageWidth * y + x;
 };
 
@@ -205,6 +230,17 @@ void printCudaDeviceInformation(int maxAvaialbeCores) {
         cudaDeviceProperties.name, cudaDeviceProperties.major, cudaDeviceProperties.minor, cudaDeviceProperties.totalGlobalMem >> 20, cudaDeviceProperties.sharedMemPerBlock >> 10, cudaDeviceProperties.multiProcessorCount);
 }
 
+/** 
+ * The original image is extended by one pixel up, down, left and right. The newly added columns and rows are filled as follows: 
+ * Example of an image with 3x3 pixels which is extended to 5x5 pixels
+ *                  A   A   B   C   C
+ *  A   B   C       A   A   B   C   C
+ *  D   E   F   ->  D   D   E   F   F
+ *  G   H   I       G   G   H   I   I
+ *                  G   G   H   I   I
+ *
+ * The original borders are copied to the newly added border. The same is done for the corners
+*/
 void fillExpandedPicture(const byte* originalImage, byte* expandedImage, const unsigned int width, const unsigned int height) {
     //copy data from original image to the expanded image and fill the new added rows/columns
     imageWidth = width;
@@ -240,91 +276,174 @@ void fillExpandedPicture(const byte* originalImage, byte* expandedImage, const u
 }
 
 void executeSobelOperator(char* image, int maxAvailableCores) {
-    //loads the image and allocates memory
+    //==========================================================
+    // 1. Step: load image
+    //==========================================================
     imgData originalImage = loadImage(image);
 
-    //create image that is two wider and two heigher than the original
+    //==========================================================
+    // 2. Step: allocate create image that is two wider and two 
+    //          heigher than the original
+    //==========================================================
     imgData expandedImage(new byte[(originalImage.width + 2) * (originalImage.height + 2)], originalImage.width + 2, originalImage.height + 2);
-    memset(expandedImage.pixels, 0, (expandedImage.width * expandedImage.height));
 
+    //not necessary: the "fillExpandedPicture" function writes to every entry in the array. Setting every pixel to 0 before is redundant
+    //memset(expandedImage.pixels, 0, (expandedImage.width * expandedImage.height));
     fillExpandedPicture(originalImage.pixels, expandedImage.pixels, expandedImage.width, expandedImage.height);
 
     //set global image width for index calculation
-    imageWidth = originalImage.width;
+    //imageWidth = originalImage.width;
 
-    //allocate space for the images
-    imgData separate_step_cpuImgage(new byte[originalImage.width * originalImage.height], originalImage.width, originalImage.height);
-    imgData combined_step_cpuImgage(new byte[originalImage.width * originalImage.height], originalImage.width, originalImage.height); 
+    //==========================================================
+    // 3. Step: allocate memory for the results
+    //==========================================================
+    imgData separateStepCpuImgageWithIndexing(new byte[originalImage.width * originalImage.height], originalImage.width, originalImage.height);
+    imgData separateStepCpuImgageWithInlineIndexing(new byte[originalImage.width * originalImage.height], originalImage.width, originalImage.height);
+    imgData separateStepCpuImgageWithoutIndexing(new byte[originalImage.width * originalImage.height], originalImage.width, originalImage.height);
+    imgData separateStepCpuImgageWithOptimzedCalculation(new byte[originalImage.width * originalImage.height], originalImage.width, originalImage.height);
+    imgData combinedStepsCpuImage(new byte[originalImage.width * originalImage.height], originalImage.width, originalImage.height);
+    imgData combinedStepsCpuImageOptimized(new byte[originalImage.width * originalImage.height], originalImage.width, originalImage.height);
 
-    imgData omp_separate_step_cpuImgage(new byte[originalImage.width * originalImage.height], originalImage.width, originalImage.height);
-    imgData omp_combined_step_cpuImgage(new byte[originalImage.width * originalImage.height], originalImage.width, originalImage.height);
+    imgData separateStepOmpImgageWithIndexing(new byte[originalImage.width * originalImage.height], originalImage.width, originalImage.height);
+    imgData separateStepOmpImgageWithInlineIndexing(new byte[originalImage.width * originalImage.height], originalImage.width, originalImage.height);
+    imgData separateStepOmpImgageWithoutIndexing(new byte[originalImage.width * originalImage.height], originalImage.width, originalImage.height);
+    imgData separateStepOmpImgageWithOptimzedCalculation(new byte[originalImage.width * originalImage.height], originalImage.width, originalImage.height);
+    imgData combinedStepsOmpImage(new byte[originalImage.width * originalImage.height], originalImage.width, originalImage.height);
+    imgData combinedStepsOmpImageOptimized(new byte[originalImage.width * originalImage.height], originalImage.width, originalImage.height);
 
-    imgData omp_combined_step_cpuImgaget(new byte[originalImage.width * originalImage.height], originalImage.width, originalImage.height);
 
-    imgData ompImgage(new byte[originalImage.width * originalImage.height], originalImage.width, originalImage.height);
-    imgData gpuImgage(new byte[originalImage.width * originalImage.height], originalImage.width, originalImage.height);
 
-    memset(separate_step_cpuImgage.pixels, 0, (originalImage.width * originalImage.height));
-    memset(combined_step_cpuImgage.pixels, 0, (originalImage.width * originalImage.height));
-    memset(omp_separate_step_cpuImgage.pixels, 0, (originalImage.width * originalImage.height));
-    memset(omp_combined_step_cpuImgage.pixels, 0, (originalImage.width * originalImage.height));
-
-    memset(omp_combined_step_cpuImgaget.pixels, 0, (originalImage.width * originalImage.height));
 
     //definitions for time measurement
     std::chrono::system_clock::time_point start;
-    std::chrono::duration<double> serparatedStepWithIndexingCPUTime;
-    std::chrono::duration<double> serparatedStepWithoutIndexingCPUTime;
+    std::chrono::duration<double> serparatedStepWithIndexingCpuTime;
+    std::chrono::duration<double> serparatedStepWithInlineIndexingCpuTime;
+    std::chrono::duration<double> serparatedStepWithoutIndexingCpuTime;
+    std::chrono::duration<double> serparatedStepWithOptimizedCalculationCpuTime;
+    std::chrono::duration<double> combinedStepsCpuTime;
+    std::chrono::duration<double> combinedStepsOptimizedCpuTime;
 
-    std::chrono::duration<double> serparatedStepWithIndexingOMPTime;
-    std::chrono::duration<double> serparatedStepWithoutIndexingOMPTime;
+    std::chrono::duration<double> serparatedStepWithIndexingOmpTime;
+    std::chrono::duration<double> serparatedStepWithInlineIndexingOmpTime;
+    std::chrono::duration<double> serparatedStepWithoutIndexingOmpTime;
+    std::chrono::duration<double> serparatedStepWithOptimizedCalculationOmpTime;
+    std::chrono::duration<double> combinedStepsOmpTime;
+    std::chrono::duration<double> combinedStepsOptimizedOmpTime;
 
-
-    std::chrono::duration<double> serparatedStepWithoutIndexingOMPTimetttt;
+    //==========================================================
+    // 5. Step: Executing and meassering 
+    //==========================================================
 
     //Single core sobel function with indexing and seperated steps (3 total steps) 
     start = std::chrono::system_clock::now();
-    separate_step_sobel_cpu_with_indexing(expandedImage.pixels, separate_step_cpuImgage.pixels, expandedImage.width, expandedImage.height, 1);
-    serparatedStepWithIndexingCPUTime = std::chrono::system_clock::now() - start;
+    separateStepSobelCpuWithIndexing(expandedImage.pixels, separateStepCpuImgageWithIndexing.pixels, expandedImage.width, expandedImage.height, 1);
+    serparatedStepWithIndexingCpuTime = std::chrono::system_clock::now() - start;
 
-    ////Single core soble function without indexing and seperated steps (3 total steps) 
-    //start = std::chrono::system_clock::now();
-    //separate_step_sobel_cpu_without_indexing(expandedImage.pixels, combined_step_cpuImgage.pixels, expandedImage.width, expandedImage.height, 1);
-    //serparatedStepWithoutIndexingCPUTime = std::chrono::system_clock::now() - start;
+    //Single core sobel function with inline indexing and seperated steps (3 total steps) 
+    start = std::chrono::system_clock::now();
+    separateStepSobelCpuWithInlineIndexing(expandedImage.pixels, separateStepCpuImgageWithInlineIndexing.pixels, expandedImage.width, expandedImage.height, 1);
+    serparatedStepWithInlineIndexingCpuTime = std::chrono::system_clock::now() - start;
+
+    //Single core soble function without indexing and seperated steps (3 total steps) 
+    start = std::chrono::system_clock::now();
+    separateStepSobelCpuWithoutIndexing(expandedImage.pixels, separateStepCpuImgageWithoutIndexing.pixels, expandedImage.width, expandedImage.height, 1);
+    serparatedStepWithoutIndexingCpuTime = std::chrono::system_clock::now() - start;
+
+    //Single core soble function without indexing, seperated steps (3 total steps) and optimized calculations 
+    start = std::chrono::system_clock::now();
+    separateStepSobelCpuOptimizedCalculation(expandedImage.pixels, separateStepCpuImgageWithOptimzedCalculation.pixels, expandedImage.width, expandedImage.height, 1);
+    serparatedStepWithOptimizedCalculationCpuTime = std::chrono::system_clock::now() - start;
+
+    //Single core soble function without indexing and seperated steps (3 total steps) 
+    start = std::chrono::system_clock::now();
+    combinedStepsSobelCpu(expandedImage.pixels, combinedStepsCpuImage.pixels, expandedImage.width, expandedImage.height, 1);
+    combinedStepsCpuTime = std::chrono::system_clock::now() - start;
+
+    //Single core soble function without indexing and seperated steps (3 total steps) 
+    start = std::chrono::system_clock::now();
+    combinedStepsSobelCpuOptimized(expandedImage.pixels, combinedStepsCpuImageOptimized.pixels, expandedImage.width, expandedImage.height, 1);
+    combinedStepsOptimizedCpuTime = std::chrono::system_clock::now() - start;
+
+
 
     //Multi core sobel function with indexing and seperated steps (3 total steps) 
     start = std::chrono::system_clock::now();
-    separate_step_sobel_cpu_with_indexing(expandedImage.pixels, omp_separate_step_cpuImgage.pixels, expandedImage.width, expandedImage.height, maxAvailableCores);
-    serparatedStepWithIndexingOMPTime = std::chrono::system_clock::now() - start;
+    separateStepSobelCpuWithIndexing(expandedImage.pixels, separateStepOmpImgageWithIndexing.pixels, expandedImage.width, expandedImage.height, maxAvailableCores);
+    serparatedStepWithIndexingOmpTime = std::chrono::system_clock::now() - start;
 
-    ////Multi core soble function without indexing and seperated steps (3 total steps) 
-    //start = std::chrono::system_clock::now();
-    //separate_step_sobel_cpu_without_indexing(expandedImage.pixels, omp_combined_step_cpuImgage.pixels, expandedImage.width, expandedImage.height, maxAvailableCores);
-    //serparatedStepWithoutIndexingOMPTime = std::chrono::system_clock::now() - start;
+    //Multi core sobel function with inline indexing and seperated steps (3 total steps) 
+    start = std::chrono::system_clock::now();
+    separateStepSobelCpuWithInlineIndexing(expandedImage.pixels, separateStepOmpImgageWithInlineIndexing.pixels, expandedImage.width, expandedImage.height, maxAvailableCores);
+    serparatedStepWithInlineIndexingOmpTime = std::chrono::system_clock::now() - start;
 
-    //test
-    /*start = std::chrono::system_clock::now();
-    test(originalImage.pixels, omp_combined_step_cpuImgaget.pixels, originalImage.width, originalImage.height, 1);
-    serparatedStepWithoutIndexingOMPTimetttt = std::chrono::system_clock::now() - start;*/
+    //Multi core soble function without indexing and seperated steps (3 total steps) 
+    start = std::chrono::system_clock::now();
+    separateStepSobelCpuWithoutIndexing(expandedImage.pixels, separateStepOmpImgageWithoutIndexing.pixels, expandedImage.width, expandedImage.height, maxAvailableCores);
+    serparatedStepWithoutIndexingOmpTime = std::chrono::system_clock::now() - start;
+
+    //Multi core soble function without indexing and seperated steps (3 total steps) 
+    start = std::chrono::system_clock::now();
+    separateStepSobelCpuOptimizedCalculation(expandedImage.pixels, separateStepOmpImgageWithOptimzedCalculation.pixels, expandedImage.width, expandedImage.height, maxAvailableCores);
+    serparatedStepWithOptimizedCalculationOmpTime = std::chrono::system_clock::now() - start;
+
+    start = std::chrono::system_clock::now();
+    combinedStepsSobelCpu(expandedImage.pixels, combinedStepsOmpImage.pixels, expandedImage.width, expandedImage.height, maxAvailableCores);
+    combinedStepsOmpTime = std::chrono::system_clock::now() - start;
+
+    //Single core soble function without indexing and seperated steps (3 total steps) 
+    start = std::chrono::system_clock::now();
+    combinedStepsSobelCpuOptimized(expandedImage.pixels, combinedStepsOmpImageOptimized.pixels, expandedImage.width, expandedImage.height, maxAvailableCores);
+    combinedStepsOptimizedOmpTime = std::chrono::system_clock::now() - start;
+
+    /*Multi core soble function without indexing and seperated steps (3 total steps) 
+    start = std::chrono::system_clock::now();
+    separate_step_sobel_cpu_without_indexing(expandedImage.pixels, omp_combined_step_cpuImgage.pixels, expandedImage.width, expandedImage.height, maxAvailableCores);
+    serparatedStepWithoutIndexingOMPTime = std::chrono::system_clock::now() - start;*/
 
 
 
-    printf("CPU execution time    = %*.1f msec\n", 5, 1000 * serparatedStepWithIndexingCPUTime.count());
-    printf("CPU execution time    = %*.1f msec\n", 5, 1000 * serparatedStepWithoutIndexingCPUTime.count());
-    printf("CPU execution time    = %*.1f msec\n", 5, 1000 * serparatedStepWithIndexingOMPTime.count());
-    printf("CPU execution time    = %*.1f msec\n", 5, 1000 * serparatedStepWithoutIndexingOMPTime.count());
-    //printf("CPU execution time    = %*.1f msec\n", 5, 1000 * serparatedStepWithoutIndexingOMPTimetttt.count());
 
-    writeImage(image, "cpuu", separate_step_cpuImgage);
-    writeImage(image, "cpuut", combined_step_cpuImgage);
+    printf("CPU with Indexing            = %*.1f msec\n", 5, 1000 * serparatedStepWithIndexingCpuTime.count());
+    printf("OMP with Indexing            = %*.1f msec\n\n", 5, 1000 * serparatedStepWithIndexingOmpTime.count());
+
+    printf("CPU with inline Indexing     = %*.1f msec\n", 5, 1000 * serparatedStepWithInlineIndexingCpuTime.count());
+    printf("OMP with inline Indexing     = %*.1f msec\n\n", 5, 1000 * serparatedStepWithInlineIndexingOmpTime.count());
+
+    printf("CPU without Indexing         = %*.1f msec\n", 5, 1000 * serparatedStepWithoutIndexingCpuTime.count());
+    printf("OMP without Indexing         = %*.1f msec\n\n", 5, 1000 * serparatedStepWithoutIndexingOmpTime.count());
+
+    printf("CPU optimized Calc           = %*.1f msec\n", 5, 1000 * serparatedStepWithOptimizedCalculationCpuTime.count());
+    printf("OMP optimized Calc           = %*.1f msec\n\n", 5, 1000 * serparatedStepWithOptimizedCalculationOmpTime.count());
+
+    printf("CPU combined Steps           = %*.1f msec\n", 5, 1000 * combinedStepsCpuTime.count());
+    printf("OMP combined Steps           = %*.1f msec\n\n", 5, 1000 * combinedStepsOmpTime.count());
+
+
+    printf("CPU combined Steps Optimized = %*.1f msec\n", 5, 1000 * combinedStepsOptimizedCpuTime.count());
+    printf("OMP combined Steps Optimized = %*.1f msec\n\n", 5, 1000 * combinedStepsOptimizedOmpTime.count());
+
+    writeImage(image, "cpu_1", separateStepCpuImgageWithIndexing);
+    writeImage(image, "cpu_2", separateStepCpuImgageWithInlineIndexing);
+    writeImage(image, "cpu_3", separateStepCpuImgageWithoutIndexing);
+    writeImage(image, "cpu_4", separateStepCpuImgageWithOptimzedCalculation);
+    writeImage(image, "cpu_5", combinedStepsCpuImage);
+    writeImage(image, "cpu_6", combinedStepsOmpImage);
 }
 
-void separate_step_sobel_cpu_with_indexing(const byte* image, byte* cpu, const unsigned int width, const unsigned int height, int maxCores) {
+/**
+* First implementation of the Sobel operator. In this case, dx and dy are each calculated in a separate run. 
+* At the end, the result of dx and dy is also calculated. This results in 3 separate runs. 
+* For the access to the one dimensional array an extra getIndex function is used, which allows to access the one dimensional array 
+* like a two dimensional array. This implementation does not contain any optimizations and will serve as a basis for comparison 
+* to all other Sobel operator implementations.
+*/
+void separateStepSobelCpuWithIndexing(const byte* image, byte* result, const unsigned int width, const unsigned int height, int maxCores) {
     int* dx = new int[(width - 2) * (height - 2)];
     int* dy = new int[(width - 2) * (height - 2)];
 
     omp_set_num_threads(maxCores);
     imageWidth = width;
+
     #pragma omp parallel for
     for (int y = 1; y < height - 1; y++) {
         for (int x = 1; x < width - 1; x++) {
@@ -346,21 +465,58 @@ void separate_step_sobel_cpu_with_indexing(const byte* image, byte* cpu, const u
     #pragma omp parallel for
     for (int y = 1; y < height - 1; y++) {
         for (int x = 1; x < width - 1; x++) {
-            cpu[getIndex(x - 1, y - 1)] = sqrt((dx[getIndex(x - 1, y - 1)] * dx[getIndex(x - 1, y - 1)]) + (dy[getIndex(x - 1, y - 1)] * dy[getIndex(x - 1, y - 1)]));
+            result[getIndex(x - 1, y - 1)] = sqrt((dx[getIndex(x - 1, y - 1)] * dx[getIndex(x - 1, y - 1)]) + (dy[getIndex(x - 1, y - 1)] * dy[getIndex(x - 1, y - 1)]));
         }
     }
 }
 
-void separate_step_sobel_cpu_without_indexing(const byte* image, byte* cpu, const unsigned int width, const unsigned int height, int maxCores) {
-    int* dx = new int[width * height];
-    int* dy = new int[width * height];
+/**
+ * Same implmentation as before, the only optimization is that the indexing function is now a inline function 
+ */
+void separateStepSobelCpuWithInlineIndexing(const byte* image, byte* result, const unsigned int width, const unsigned int height, int maxCores) {
+    int* dx = new int[(width - 2) * (height - 2)];
+    int* dy = new int[(width - 2) * (height - 2)];
+
+    omp_set_num_threads(maxCores);
+    imageWidth = width;
+
+    #pragma omp parallel for
+    for (int y = 1; y < height - 1; y++) {
+        for (int x = 1; x < width - 1; x++) {
+            dx[(width - 2) * (y - 1) + (x - 1)] = (1 * image[getIndexInline(x - 1, y - 1)]) + (-1 * image[getIndexInline(x + 1, y - 1)]) +
+                (2 * image[getIndexInline(x - 1, y)]) + (-2 * image[getIndexInline(x + 1, y)]) +
+                (1 * image[getIndexInline(x - 1, y + 1)]) + (-1 * image[getIndexInline(x + 1, y + 1)]);
+        }
+    }
+
+    #pragma omp parallel for
+    for (int y = 1; y < height - 1; y++) {
+        for (int x = 1; x < width - 1; x++) {
+            dy[(width - 2) * (y - 1) + (x - 1)] = (1 * image[getIndexInline(x - 1, y - 1)]) + (2 * image[getIndexInline(x, y - 1)]) + (1 * image[getIndexInline(x + 1, y - 1)]) +
+                (-1 * image[getIndexInline(x - 1, y + 1)]) + (-2 * image[getIndexInline(x, y + 1)]) + (-1 * image[getIndexInline(x + 1, y + 1)]);
+        }
+    }
+
+    imageWidth = width - 2;
+    #pragma omp parallel for
+    for (int y = 1; y < height - 1; y++) {
+        for (int x = 1; x < width - 1; x++) {
+            result[getIndexInline(x - 1, y - 1)] = sqrt((dx[getIndexInline(x - 1, y - 1)] * dx[getIndexInline(x - 1, y - 1)]) + (dy[getIndexInline(x - 1, y - 1)] * dy[getIndexInline(x - 1, y - 1)]));
+        }
+    }
+}
+
+//Same implementation but the calculation is now moved away from an extra function directly into the code
+void separateStepSobelCpuWithoutIndexing(const byte* image, byte* result, const unsigned int width, const unsigned int height, int maxCores) {
+    int* dx = new int[(width - 2) * (height - 2)];
+    int* dy = new int[(width - 2) * (height - 2)];
 
     omp_set_num_threads(maxCores);
 
     #pragma omp parallel for
     for (int y = 1; y < height - 1; y++) {
         for (int x = 1; x < width - 1; x++) {
-            dx[y * width + x] = (1 * image[width * (y - 1) + (x - 1)]) + (-1 * image[width * (y - 1) + (x + 1)]) +
+            dx[(width - 2) * (y - 1) + (x - 1)] = (1 * image[width * (y - 1) + (x - 1)]) + (-1 * image[width * (y - 1) + (x + 1)]) +
                 (2 * image[width * y + (x - 1)]) + (-2 * image[width * y + (x + 1)]) +
                 (1 * image[width * (y + 1) + (x - 1)]) + (-1 * image[width * (y + 1) + (x + 1)]);
         }
@@ -369,46 +525,89 @@ void separate_step_sobel_cpu_without_indexing(const byte* image, byte* cpu, cons
     #pragma omp parallel for
     for (int y = 1; y < height - 1; y++) {
         for (int x = 1; x < width - 1; x++) {
-            dy[y * width + x] = (image[(y - 1) * width + (x - 1)]) + (2 * image[(y - 1) * width + x]) + (image[(y - 1) * width + (x + 1)]) +
+            dy[(width - 2) * (y - 1) + (x - 1)] = (image[(y - 1) * width + (x - 1)]) + (2 * image[(y - 1) * width + x]) + (image[(y - 1) * width + (x + 1)]) +
                 (-1 * image[(y + 1) * width + (x - 1)]) + (-2 * image[(y + 1) * width + x]) + (-1 * image[(y + 1) * width + (x + 1)]);
         }
     }
-
+    
     #pragma omp parallel for
     for (int y = 1; y < height - 1; y++) {
         for (int x = 1; x < width - 1; x++) {
-            cpu[y * width + x] = sqrt((dx[y * width + x] * dx[y * width + x]) + (dy[y * width + x] * dy[y * width + x]));
+            result[(y - 1) * (width - 2) + (x - 1)] = sqrt((dx[(y - 1) * (width - 2) + (x - 1)] * dx[(y - 1) * (width - 2) + (x - 1)]) + (dy[(y - 1) * (width - 2) + (x - 1)] * dy[(y - 1) * (width - 2) + (x - 1)]));
         }
     }
 }
 
-void test(const byte* image, byte* cpu, const unsigned int width, const unsigned int height, int maxCores) {
-    int* dx = new int[width * height];
-    int* dy = new int[width * height];
+//optimized calculation
+void separateStepSobelCpuOptimizedCalculation(const byte* image, byte* result, const unsigned int width, const unsigned int height, int maxCores) {
+    int* dx = new int[(width - 2) * (height - 2)];
+    int* dy = new int[(width - 2) * (height - 2)];
 
     omp_set_num_threads(maxCores);
 
     #pragma omp parallel for
     for (int y = 1; y < height - 1; y++) {
+        int tmpWidth = width * y;
         for (int x = 1; x < width - 1; x++) {
-            dx[y * width + x] = (1 * image[width * (y - 1) + (x - 1)]) + (-1 * image[width * (y - 1) + (x + 1)]) +
+            dx[(width - 2) * (y - 1) + (x - 1)] = (image[tmpWidth - width + (x - 1)]) + (-image[tmpWidth - width + (x + 1)]) +
+                (image[tmpWidth + (x - 1)] << 1) + (-(image[tmpWidth + (x + 1)] << 1)) +
+                (image[tmpWidth + width + (x - 1)]) + (-image[tmpWidth + width + (x + 1)]);
+        }
+    }
+
+    #pragma omp parallel for
+    for (int y = 1; y < height - 1; y++) {
+        int tmpWidth = width * y;
+        for (int x = 1; x < width - 1; x++) {
+            dy[(width - 2) * (y - 1) + (x - 1)] = (image[tmpWidth - width + (x - 1)]) + (image[tmpWidth - width + x] << 1) + (image[tmpWidth - width + (x + 1)]) +
+                (-image[tmpWidth + width + (x - 1)]) + (-(image[tmpWidth + width + x] << 1)) + (-image[tmpWidth + width + (x + 1)]);
+        }
+    }
+
+    #pragma omp parallel for
+    for (int y = 1; y < height - 1; y++) {
+        int tmpWidth = (width - 2) * (y - 1);
+        for (int x = 1; x < width - 1; x++) {
+            result[tmpWidth + (x - 1)] = sqrt((dx[tmpWidth + (x - 1)] * dx[tmpWidth + (x - 1)]) + (dy[tmpWidth + (x - 1)] * dy[tmpWidth + (x - 1)]));
+        }
+    }
+}
+
+void combinedStepsSobelCpu(const byte* image, byte* result, const unsigned int width, const unsigned int height, int maxCores) {
+    omp_set_num_threads(maxCores);
+
+    #pragma omp parallel for collapse(2)
+    for (int y = 1; y < height - 1; y++) {
+        for (int x = 1; x < width - 1; x++) {
+            int dx = (image[width * (y - 1) + (x - 1)]) + (-image[width * (y - 1) + (x + 1)]) +
                 (2 * image[width * y + (x - 1)]) + (-2 * image[width * y + (x + 1)]) +
-                (1 * image[width * (y + 1) + (x - 1)]) + (-1 * image[width * (y + 1) + (x + 1)]);
+                (image[width * (y + 1) + (x - 1)]) + (-image[width * (y + 1) + (x + 1)]);
+
+            int dy = (image[(y - 1) * width + (x - 1)]) + (2 * image[(y - 1) * width + x]) + (image[(y - 1) * width + (x + 1)]) +
+                (-image[(y + 1) * width + (x - 1)]) + (-2 * image[(y + 1) * width + x]) + (-image[(y + 1) * width + (x + 1)]);
+
+            result[(width - 2) * (y - 1) + (x - 1)] = sqrt((dx * dx) + (dy * dy));
         }
     }
+}
 
-    #pragma omp parallel for
-    for (int y = 1; y < height - 1; y++) {
-        for (int x = 1; x < width - 1; x++) {
-            dy[y * width + x] = (image[(y - 1) * width + (x - 1)]) + (image[(y - 1) * width + x] << 1) + (image[(y - 1) * width + (x + 1)]) +
-                (-1 * image[(y + 1) * width + (x - 1)]) + (-image[(y + 1) * width + x] << 1) + (-1 * image[(y + 1) * width + (x + 1)]);
-        }
-    }
+void combinedStepsSobelCpuOptimized(const byte* image, byte* result, const unsigned int width, const unsigned int height, int maxCores) {
+    omp_set_num_threads(maxCores);
 
-    #pragma omp parallel for
+#pragma omp parallel for
     for (int y = 1; y < height - 1; y++) {
+        int tmp = width * y;
+        int tmp_m = tmp - width;
+        int tmp_p = tmp + width;
         for (int x = 1; x < width - 1; x++) {
-            cpu[y * width + x] = sqrt((dx[y * width + x] * dx[y * width + x]) + (dy[y * width + x] * dy[y * width + x]));
+            int dx = (image[tmp_m + (x - 1)]) + (-image[tmp_m + (x + 1)]) +
+                (2 * image[tmp + (x - 1)]) + (-2 * image[tmp + (x + 1)]) +
+                (image[tmp_p + (x - 1)]) + (-image[tmp_p + (x + 1)]);
+
+            int dy = (image[tmp_m + (x - 1)]) + (2 * image[tmp_m + x]) + (image[tmp_m + (x + 1)]) +
+                (-image[tmp_p + (x - 1)]) + (-2 * image[tmp_p + x]) + (-image[tmp_p + (x + 1)]);
+
+            result[(width - 2) * (y - 1) + (x - 1)] = sqrt((dx * dx) + (dy * dy));
         }
     }
 }
